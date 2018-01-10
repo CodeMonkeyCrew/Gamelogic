@@ -1,0 +1,3 @@
+/Users/niklas/CLionProjects/MK64Logic/cmake-build-debug/CMakeFiles/rebuild_cache.dir
+/Users/niklas/CLionProjects/MK64Logic/cmake-build-debug/CMakeFiles/edit_cache.dir
+/Users/niklas/CLionProjects/MK64Logic/cmake-build-debug/CMakeFiles/MK64Logic.dir

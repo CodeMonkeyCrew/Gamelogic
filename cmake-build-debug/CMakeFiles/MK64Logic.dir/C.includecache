@@ -1,0 +1,42 @@
+#IncludeRegexLine: ^[ 	]*[#%][ 	]*(include|import)[ 	]*[<"]([^">]+)([">])
+
+#IncludeRegexScan: ^.*$
+
+#IncludeRegexComplain: ^$
+
+#IncludeRegexTransform: 
+
+/Users/niklas/CLionProjects/MK64Logic/GameLogic.c
+stdio.h
+-
+GameLogic.h
+/Users/niklas/CLionProjects/MK64Logic/GameLogic.h
+SPICommunication.h
+/Users/niklas/CLionProjects/MK64Logic/SPICommunication.h
+Zigbee.h
+/Users/niklas/CLionProjects/MK64Logic/Zigbee.h
+
+/Users/niklas/CLionProjects/MK64Logic/GameLogic.h
+Gamestate.h
+/Users/niklas/CLionProjects/MK64Logic/Gamestate.h
+
+/Users/niklas/CLionProjects/MK64Logic/Gamestate.h
+inttypes.h
+-
+
+/Users/niklas/CLionProjects/MK64Logic/SPICommunication.h
+Gamestate.h
+/Users/niklas/CLionProjects/MK64Logic/Gamestate.h
+
+/Users/niklas/CLionProjects/MK64Logic/Zigbee.h
+inttypes.h
+-
+GameLogic.h
+/Users/niklas/CLionProjects/MK64Logic/GameLogic.h
+
+/Users/niklas/CLionProjects/MK64Logic/main.c
+GameLogic.h
+/Users/niklas/CLionProjects/MK64Logic/GameLogic.h
+inttypes.h
+-
+
