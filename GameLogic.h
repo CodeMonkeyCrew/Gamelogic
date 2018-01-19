@@ -12,6 +12,8 @@ typedef union u_Color {
     } Color_t;
     uint32_t color;
 } uColor_t;
+
+
 /**
  *  DIRECTION = 1
  *  ACCELERATE = 2
@@ -20,13 +22,21 @@ typedef union u_Color {
  *  USE = 5
  *  NOC = 6
  */
-
 typedef struct Command {
     uint8_t command;
     uint8_t value;
 } Command_t;
 
-void on_change(uint8_t player_number, uColor_t color);
+
+enum {
+    BOOST = 0, LIGHTNING = 1, REVERSE = 2
+} ITEM;
+
+enum {
+    BOOSTED_BIT = 0, SLOWED_BIT = 1, REVERSED_BIT = 2
+} STATUS;
+
+void on_color_change(uint8_t player_number, uColor_t color);
 
 void on_command(uint8_t player_number, Command_t command);
 
