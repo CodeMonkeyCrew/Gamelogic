@@ -2,6 +2,7 @@
 #define MK64LOGIC_GAMESTATE_H
 
 #include <inttypes.h>
+#include "N64ControllerState.h"
 
 /**
  * item -> least -> right
@@ -39,12 +40,13 @@ typedef struct PlayerStatus {
 
 typedef struct Player {
     uint32_t currentColor;
-    PlayerStatus_t status;
+    PlayerStatus_t *status;
+    N64ControllerState_t controllerState;
 } Player_t;
 
 typedef struct Gamestate {
-    PlayerStatus_t *player1;
-    PlayerStatus_t *player2;
+    PlayerStatus_t player1;
+    PlayerStatus_t player2;
     uint8_t game_status : 2;
     uint8_t player: 2;
 } Gamestate_t;

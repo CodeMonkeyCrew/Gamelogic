@@ -19,7 +19,9 @@
 #define BOOSTED_SPEED_CAP 168
 #define SLOWED_SPEED_CAP 148
 #define STOP_CAP 127
-#define OUT_OF_TRACK_CAP 128
+#define OUT_OF_TRACK_CAP 135
+#define OUT_OF_TRACK_BACKWARDS_CAP 129
+#define BACKWARDS_CAP 100
 #define AVERAGE 128
 
 
@@ -27,29 +29,42 @@ Gamestate_t gamestate;
 Player_t player1;
 Player_t player2;
 
-void handle_direction(PlayerStatus_t *player, Command_t *command);
-void handle_acceleration(PlayerStatus_t *player, Command_t *command);
-void handle_throttle(PlayerStatus_t *player, Command_t *command);
+int get_steering(Player_t *player);
+int handle_acceleration(Player_t *player);
+int handle_backwards(Player_t *player);
 void handle_start(PlayerStatus_t *player, Command_t *command);
 void handle_use_item(PlayerStatus_t *player, PlayerStatus_t *enemyPlayer);
 
 void init() {
-    player1.status.in_track = 1;
-    player1.status.lap = 0;
-    player1.status.status = 0;
-    player1.status.item = 0;
-    player1.status.RFU = 0;
+    player1.status = &gamestate.player1;
+
+    player1.status->in_track = 1;
+    player1.status->lap = 0;
+    player1.status->status = 0;
+    player1.status->item = 0;
+    player1.status->RFU = 0;
     player1.currentColor = 0x0;
 
-    player2.status.in_track = 1;
-    player2.status.lap = 0;
-    player2.status.status = 0;
-    player2.status.item = 0;
-    player2.status.RFU = 0;
+    player1.controllerState.accelerate = 0;
+    player1.controllerState.backwards = 0;
+    player1.controllerState.start = 0;
+    player1.controllerState.useItem = 0;
+    player1.controllerState.direction = 0;
+
+    player2.status = &gamestate.player2;
+    player2.status->in_track = 1;
+    player2.status->lap = 0;
+    player2.status->status = 0;
+    player2.status->item = 0;
+    player2.status->RFU = 0;
     player2.currentColor = 0x0;
 
-    gamestate.player1 = &player1.status;
-    gamestate.player2 = &player2.status;
+    player2.controllerState.accelerate = 0;
+    player2.controllerState.backwards = 0;
+    player2.controllerState.start = 0;
+    player2.controllerState.useItem = 0;
+    player2.controllerState.direction = 0;
+
     gamestate.game_status = 1;
 }
 
@@ -117,34 +132,33 @@ void on_color_change(uint8_t player_number, uColor_t color) {
     Player_t player = player_number == 0 ? player1 : player2;
 
     if (is_within_deviation(rgb, BLACK)) {
-        set_random_item(&player.status);
+        set_random_item(player.status);
         player.currentColor = BLACK;
     }
     else if (is_within_deviation(rgb, RED)) {
-        activate_speed_pad_boost(&player.status);
+        activate_speed_pad_boost(player.status);
         player.currentColor = RED;
     }
     else if (is_within_deviation(rgb, BLUE)){
         if (player.currentColor == YELLOW) {
-            subtract_finished_lap(&player.status);
+            subtract_finished_lap(player.status);
         }
         player.currentColor = BLUE;
     }
     else if (is_within_deviation(rgb, YELLOW)) {
         if (player.currentColor == BLUE) {
-            finished_lap(&player.status);
+            player.currentColor = YELLOW;
         }
-        player.currentColor = YELLOW;
     }
     else if (is_within_deviation(rgb, GREEN)) {
         if (player.currentColor == WHITE) {
-            player.status.in_track = 1; //slow down handled in handle_acceleration
+            player.status->in_track = 1; //slow down handled in handle_acceleration
         }
         player.currentColor = GREEN;
     }
     else if (is_within_deviation(rgb, WHITE)) {
         if (player.currentColor == GREEN) {
-            player.status.in_track = 0;
+            player.status->in_track = 0;
         }
         player.currentColor = WHITE;
     }
@@ -156,32 +170,27 @@ void on_color_change(uint8_t player_number, uColor_t color) {
  * @param command actual command which should be modified
  */
 static void handle_new_command(uint8_t player_no, Command_t *command) {
-	Player_t player;
-    Player_t enemyPlayer;
-
-    if (!player_no) {
-		player = player1;
-        enemyPlayer = player2;
-    } else {
-        player = player2;
-        enemyPlayer = player1;
-    }
+    Player_t *player = player_no == 0 ? &player1 : &player2;
 	
 	switch (command->command) {
-		case 1:
-            handle_direction(&player.status, command);
+		case DIRECTION:
+            player->controllerState.direction = command->value;
+            break;
+		case ACCELERATE:
+            if (!player->controllerState.backwards) {
+                player->controllerState.accelerate = command->value;
+            }
+            break;
+		case BACKWARDS:
+            if (!player->controllerState.accelerate) {
+                player->controllerState.backwards = command->value;
+            }
+            break;
+		case START:
+            player->controllerState.start = command->value;
 			break;
-		case 2:
-            handle_acceleration(&player.status, command);
-			break;
-		case 3:
-            handle_throttle(&player.status, command);
-			break;
-		case 4:
-            handle_start(&player.status, command);
-			break;
-		case 5:
-            handle_use_item(&player.status, &enemyPlayer.status);
+		case USEITEM:
+            player->controllerState.useItem = command->value;
 			break;
 		default:
 		    //nothing to do here yet
@@ -196,41 +205,54 @@ void on_command(uint8_t player_number, Command_t command) {
 	}
 }
 
-//reverse input (left <-> right) left = 0, right = 255, straight forward 127/128
+//backwards input (left <-> right) left = 0, right = 255, straight forward 127/128
 //TODO check limits
-void handle_direction(PlayerStatus_t *player, Command_t *command) {
-	if (player->status & REVERSED_BIT) {
+int get_steering(Player_t *player) {
+	if (player->status->status & REVERSED_BIT) {
 		int difference;
-		if (command->value < AVERAGE) {
-			difference = AVERAGE - command->value;
-			command->value = AVERAGE + difference;
+        int direction = player->controllerState.direction;
+
+		if (direction < AVERAGE) {
+			difference = AVERAGE - direction;
+			return AVERAGE + difference;
 		}
-		else if (command->value > AVERAGE) {
-			difference = command->value - AVERAGE;
-			command->value = AVERAGE - difference;
+		else if (direction > AVERAGE) {
+			difference = direction - AVERAGE;
+			return AVERAGE - difference;
 		}
 	}
+    return player->controllerState.direction;
 }
 
-
-void handle_acceleration(PlayerStatus_t *player, Command_t *command) {
-	if (command->value) {
-        if (!player->in_track) {
-            command->value = OUT_OF_TRACK_CAP;
-        } else if (player->status & BOOSTED_BIT) {
-            command->value = BOOSTED_SPEED_CAP;
-        } else if (player->status & SLOWED_BIT) {
-            command->value = SLOWED_SPEED_CAP;
-        } else {
-            command->value = SPEED_CAP;
-        }
-	} else {
-        command->value = STOP_CAP;
+int get_engine(Player_t *player) {
+    if (player->controllerState.accelerate) {
+        return handle_acceleration(player);
+    }
+    else if (player->controllerState.backwards) {
+        return handle_backwards(player);
+    } else {
+        return STOP_CAP;
     }
 }
 
-void handle_throttle(PlayerStatus_t *player, Command_t *command) {
-	//todo
+int handle_acceleration(Player_t *player) {
+    if (!player->status->in_track) {
+        return OUT_OF_TRACK_CAP;
+    } else if (player->status->status & BOOSTED_BIT) {
+        return BOOSTED_SPEED_CAP;
+    } else if (player->status->status & SLOWED_BIT) {
+        return SLOWED_SPEED_CAP;
+    } else {
+        return SPEED_CAP;
+    }
+}
+
+int handle_backwards(Player_t *player) {
+	if (!player->status->in_track) {
+        return OUT_OF_TRACK_BACKWARDS_CAP;
+    } else {
+        return BACKWARDS_CAP;
+    }
 }
 
 void handle_start(PlayerStatus_t *player, Command_t *command) {

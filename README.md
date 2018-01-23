@@ -22,7 +22,7 @@ Colors:
 
     Blue->Yellow:
         Blue signals that the player drove over the finishing line from the correct direction. Finished Laps is
-        increased by 1 if the next received color is yellow. If the reverse order (Yellow->Blue) is received, finished
+        increased by 1 if the next received color is yellow. If the backwards order (Yellow->Blue) is received, finished
         Laps is decreased by 1. This prevents driving over the finishing line, backing up and driving over the finishing
         line again.
 

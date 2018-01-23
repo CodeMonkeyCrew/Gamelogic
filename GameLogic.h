@@ -21,6 +21,11 @@ typedef union u_Color {
  *  USE = 5
  *  NOC = 6
  */
+
+enum {
+    DIRECTION = 1, ACCELERATE = 2, BACKWARDS = 3, START = 4, USEITEM = 5, NOC= = 6
+} COMMAND_ENUM;
+
 typedef struct Command {
     uint8_t command;
     uint8_t value;
