@@ -37,9 +37,14 @@ typedef struct PlayerStatus {
     uint8_t RFU: 4;
 } PlayerStatus_t;
 
+typedef struct Player {
+    uint32_t currentColor;
+    PlayerStatus_t status;
+} Player_t;
+
 typedef struct Gamestate {
-    PlayerStatus_t player1;
-    PlayerStatus_t player2;
+    PlayerStatus_t *player1;
+    PlayerStatus_t *player2;
     uint8_t game_status : 2;
     uint8_t player: 2;
 } Gamestate_t;

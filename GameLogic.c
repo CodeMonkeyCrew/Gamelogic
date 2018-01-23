@@ -4,23 +4,28 @@
 #include "SPICommunication.h"
 #include "Zigbee.h"
 
-#define RED     0xff0000
-#define GREEN   0x00ff00
-#define BLUE    0x0000ff
 #define BLACK   0x000000
+#define BLUE    0x0000ff
+#define GREEN   0x00ff00
+#define RED     0xff0000
+#define YELLOW  0xffff00
+#define WHITE   0xffffff
 #define COLOR_DEVIATION 0x000030
 
 #define MAX_NO_OF_LAPS 3
 #define NO_OF_ITEMS 3
 
-#define SPEED_CAP 128
-#define SPEED_CAP_INCREASE 20
-#define SPEED_CAP_DECREASE 20
+#define SPEED_CAP 158
+#define BOOSTED_SPEED_CAP 168
+#define SLOWED_SPEED_CAP 148
+#define STOP_CAP 127
+#define OUT_OF_TRACK_CAP 128
 #define AVERAGE 128
 
 
 Gamestate_t gamestate;
-
+Player_t player1;
+Player_t player2;
 
 void handle_direction(PlayerStatus_t *player, Command_t *command);
 void handle_acceleration(PlayerStatus_t *player, Command_t *command);
@@ -28,26 +33,34 @@ void handle_throttle(PlayerStatus_t *player, Command_t *command);
 void handle_start(PlayerStatus_t *player, Command_t *command);
 void handle_use_item(PlayerStatus_t *player, PlayerStatus_t *enemyPlayer);
 
+void init() {
+    player1.status.in_track = 1;
+    player1.status.lap = 0;
+    player1.status.status = 0;
+    player1.status.item = 0;
+    player1.status.RFU = 0;
+    player1.currentColor = 0x0;
+
+    player2.status.in_track = 1;
+    player2.status.lap = 0;
+    player2.status.status = 0;
+    player2.status.item = 0;
+    player2.status.RFU = 0;
+    player2.currentColor = 0x0;
+
+    gamestate.player1 = &player1.status;
+    gamestate.player2 = &player2.status;
+    gamestate.game_status = 1;
+}
 
 static void activate_speed_pad_boost(PlayerStatus_t *player) {
     if ((player->status >> BOOSTED_BIT) & 0) {
         player->status |= 1 << BOOSTED_BIT;
     }
-    printf("Boost!!!!!");
     //sendGamestateToPi(gamestate);
 }
 
-//player drives over track line
-static void cross_track_line(PlayerStatus_t *player) {
-    //toggle in_track bit
-    //if player leaves track it should be 0 and slow down dramatically (see function handle_acceleration)
-    //if player reenters track it should be 1 and return to normal speed
-    //TODO needs testing if it really only toggles once upon crossing the track line
-    //TODO or add two colored track lines
-    player->in_track ^= 1;
-}
-
-//player drove over finishing line
+//player drives over finishing line
 static void finished_lap(PlayerStatus_t *player) {
     if (player->lap < MAX_NO_OF_LAPS) {
         player->lap++;
@@ -55,6 +68,13 @@ static void finished_lap(PlayerStatus_t *player) {
         //set game status to finished if one player finishes the race
         gamestate.game_status |= 1 << 0;
         gamestate.game_status |= 1 << 1;
+    }
+}
+
+//player reverses over finishing line
+static void subtract_finished_lap(PlayerStatus_t *player) {
+    if (player->lap > 0) {
+        player->lap--;
     }
 }
 
@@ -66,21 +86,67 @@ static void set_random_item(PlayerStatus_t *player) {
     }
 }
 
+static int is_within_deviation(uint32_t isRGBValue, int shouldRGBValue) {
+    //needed as 0x000000 - color_deviation may result in unexpected behaviour
+    if (shouldRGBValue == BLACK) {
+        return (isRGBValue >= shouldRGBValue && isRGBValue < shouldRGBValue + COLOR_DEVIATION);
+    }
+
+    //needed as 0xffffff + color_deviation may result in unexpected behaviour
+    if (shouldRGBValue == WHITE) {
+        return (isRGBValue > shouldRGBValue - COLOR_DEVIATION && isRGBValue <= shouldRGBValue);
+    }
+
+    //all other colors
+    return isRGBValue > shouldRGBValue - COLOR_DEVIATION && isRGBValue < shouldRGBValue + COLOR_DEVIATION;
+}
+
+
+//read this
+/* quick summary of what which color means. read the README for further explanation
+ * BLACK: set new item
+ * RED: player drove over speed boost pad
+ * BLUE->Yellow: player drove over finishing line in correct direction. increase finished laps by 1 and finish race if
+ *               needed
+ * YELLOW->BLUE: player drove over finishing line in false direction. decrease finished laps by 1
+ * GREEN->WHITE: player left track, decrease speed cap
+ * WHITE->GREEN: player reentered track, increase speed cap
+*/
 void on_color_change(uint8_t player_number, uColor_t color) {
     uint32_t rgb = color.color;
-    PlayerStatus_t player = player_number == 0 ? gamestate.player1 : gamestate.player2;
+    Player_t player = player_number == 0 ? player1 : player2;
 
-    if (rgb > BLACK && rgb < BLACK + COLOR_DEVIATION) {
-        set_random_item(&player);
+    if (is_within_deviation(rgb, BLACK)) {
+        set_random_item(&player.status);
+        player.currentColor = BLACK;
     }
-    else if (rgb > BLUE - COLOR_DEVIATION && rgb < BLUE + COLOR_DEVIATION){
-        finished_lap(&player);
+    else if (is_within_deviation(rgb, RED)) {
+        activate_speed_pad_boost(&player.status);
+        player.currentColor = RED;
     }
-    else if (rgb > GREEN - COLOR_DEVIATION && rgb < GREEN + COLOR_DEVIATION) {
-        cross_track_line(&player);
+    else if (is_within_deviation(rgb, BLUE)){
+        if (player.currentColor == YELLOW) {
+            subtract_finished_lap(&player.status);
+        }
+        player.currentColor = BLUE;
     }
-    else if (rgb > RED - COLOR_DEVIATION && rgb < RED + COLOR_DEVIATION) {
-        activate_speed_pad_boost(&player);
+    else if (is_within_deviation(rgb, YELLOW)) {
+        if (player.currentColor == BLUE) {
+            finished_lap(&player.status);
+        }
+        player.currentColor = YELLOW;
+    }
+    else if (is_within_deviation(rgb, GREEN)) {
+        if (player.currentColor == WHITE) {
+            player.status.in_track = 1; //slow down handled in handle_acceleration
+        }
+        player.currentColor = GREEN;
+    }
+    else if (is_within_deviation(rgb, WHITE)) {
+        if (player.currentColor == GREEN) {
+            player.status.in_track = 0;
+        }
+        player.currentColor = WHITE;
     }
 }
 
@@ -90,32 +156,32 @@ void on_color_change(uint8_t player_number, uColor_t color) {
  * @param command actual command which should be modified
  */
 static void handle_new_command(uint8_t player_no, Command_t *command) {
-	PlayerStatus_t player;
-    PlayerStatus_t enemyPlayer;
+	Player_t player;
+    Player_t enemyPlayer;
 
     if (!player_no) {
-		player = gamestate.player1;
-        enemyPlayer = gamestate.player2;
+		player = player1;
+        enemyPlayer = player2;
     } else {
-        player = gamestate.player2;
-        enemyPlayer = gamestate.player1;
+        player = player2;
+        enemyPlayer = player1;
     }
 	
 	switch (command->command) {
 		case 1:
-            handle_direction(&player, command);
+            handle_direction(&player.status, command);
 			break;
 		case 2:
-            handle_acceleration(&player, command);
+            handle_acceleration(&player.status, command);
 			break;
 		case 3:
-            handle_throttle(&player, command);
+            handle_throttle(&player.status, command);
 			break;
 		case 4:
-            handle_start(&player, command);
+            handle_start(&player.status, command);
 			break;
 		case 5:
-            handle_use_item(&player, &enemyPlayer);
+            handle_use_item(&player.status, &enemyPlayer.status);
 			break;
 		default:
 		    //nothing to do here yet
@@ -126,13 +192,14 @@ static void handle_new_command(uint8_t player_no, Command_t *command) {
 void on_command(uint8_t player_number, Command_t command) {
 	if (command.command) { //TODO catch NOC or make NOC=0 instead 6?
         handle_new_command(player_number, &command);
-		//sendCommand(player_number, command);
+		sendCommand(player_number, command);
 	}
 }
 
-//reverse input (left -> right, right -> left) left = 0, right = 255, straight forward 127/128
+//reverse input (left <-> right) left = 0, right = 255, straight forward 127/128
+//TODO check limits
 void handle_direction(PlayerStatus_t *player, Command_t *command) {
-	if ((player->status >> REVERSED_BIT) & 1) {
+	if (player->status & REVERSED_BIT) {
 		int difference;
 		if (command->value < AVERAGE) {
 			difference = AVERAGE - command->value;
@@ -147,26 +214,18 @@ void handle_direction(PlayerStatus_t *player, Command_t *command) {
 
 
 void handle_acceleration(PlayerStatus_t *player, Command_t *command) {
-	//cap the speed if necessary
-	if (command->value > SPEED_CAP) {
-		command->value = SPEED_CAP;
-	}
-
-	if ((player->status >> BOOSTED_BIT) & 1) {
-		command->value += SPEED_CAP_INCREASE;
-	}
-	else if ((player->status >> SLOWED_BIT) & 1) {
-		if (command->value - SPEED_CAP_DECREASE < 0) {
-			command->value = 0;
-		}
-		else {
-			command->value -= SPEED_CAP_DECREASE;
-		}
-	}
-
-    //half the speed if player is outside of track
-    if (!player->in_track) {
-        command->value %= 2;
+	if (command->value) {
+        if (!player->in_track) {
+            command->value = OUT_OF_TRACK_CAP;
+        } else if (player->status & BOOSTED_BIT) {
+            command->value = BOOSTED_SPEED_CAP;
+        } else if (player->status & SLOWED_BIT) {
+            command->value = SLOWED_SPEED_CAP;
+        } else {
+            command->value = SPEED_CAP;
+        }
+	} else {
+        command->value = STOP_CAP;
     }
 }
 
@@ -183,8 +242,10 @@ void handle_use_item(PlayerStatus_t *player, PlayerStatus_t *enemyPlayer) {
     switch (player->item) {
         case BOOST:
             player->status |= 1 << BOOSTED_BIT;
+            player->status |= 0 << SLOWED_BIT;
             break;
         case LIGHTNING:
+            enemyPlayer->status |= 0 << BOOSTED_BIT;
             enemyPlayer->status |= 1 << SLOWED_BIT;
             break;
         case REVERSE:

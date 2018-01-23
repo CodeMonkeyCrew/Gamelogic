@@ -13,7 +13,6 @@ typedef union u_Color {
     uint32_t color;
 } uColor_t;
 
-
 /**
  *  DIRECTION = 1
  *  ACCELERATE = 2
@@ -35,6 +34,8 @@ enum {
 enum {
     BOOSTED_BIT = 0, SLOWED_BIT = 1, REVERSED_BIT = 2
 } STATUS;
+
+void init();
 
 void on_color_change(uint8_t player_number, uColor_t color);
 
