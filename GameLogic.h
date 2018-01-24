@@ -13,17 +13,9 @@ typedef union u_Color {
     uint32_t color;
 } uColor_t;
 
-/**
- *  DIRECTION = 1
- *  ACCELERATE = 2
- *  THROTTLE = 3
- *  START = 4
- *  USE = 5
- *  NOC = 6
- */
 
 enum {
-    DIRECTION = 1, ACCELERATE = 2, BACKWARDS = 3, START = 4, USEITEM = 5, NOC= = 6
+    DIRECTION = 1, ACCELERATE = 2, BACKWARDS = 3, START = 4, USEITEM = 5, NOC = 6
 } COMMAND_ENUM;
 
 typedef struct Command {
