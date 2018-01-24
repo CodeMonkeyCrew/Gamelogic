@@ -40,6 +40,8 @@ typedef struct PlayerStatus {
 
 typedef struct Player {
     uint32_t currentColor;
+    uint32_t previousColor;
+    uint8_t consecutiveColorReadings;
     PlayerStatus_t *status;
     N64ControllerState_t controllerState;
 } Player_t;

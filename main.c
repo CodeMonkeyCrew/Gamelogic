@@ -20,5 +20,9 @@ int main() {
     lap = gs.player1.lap;
     printf("%d", lap);
     getchar();
+
+    init();
+
+
     return 0;
 }

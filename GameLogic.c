@@ -22,18 +22,19 @@
 #define OUT_OF_TRACK_CAP 135
 #define OUT_OF_TRACK_BACKWARDS_CAP 129
 #define BACKWARDS_CAP 100
-#define AVERAGE 128
+#define MAX_DIRECTION 255
 
 
-Gamestate_t gamestate;
-Player_t player1;
-Player_t player2;
+static Gamestate_t gamestate;
+static Player_t player1;
+static Player_t player2;
 
 int get_steering(Player_t *player);
+int get_engine(Player_t *player);
 int handle_acceleration(Player_t *player);
 int handle_backwards(Player_t *player);
-void handle_start(PlayerStatus_t *player, Command_t *command);
-void handle_use_item(PlayerStatus_t *player, PlayerStatus_t *enemyPlayer);
+void handle_start(Player_t *player);
+void handle_use_item(Player_t *player, Player_t *enemyPlayer);
 
 void init() {
     player1.status = &gamestate.player1;
@@ -44,12 +45,13 @@ void init() {
     player1.status->item = 0;
     player1.status->RFU = 0;
     player1.currentColor = 0x0;
+    player1.consecutiveColorReadings = 0;
 
     player1.controllerState.accelerate = 0;
     player1.controllerState.backwards = 0;
     player1.controllerState.start = 0;
     player1.controllerState.useItem = 0;
-    player1.controllerState.direction = 0;
+    player1.controllerState.direction = 127;
 
     player2.status = &gamestate.player2;
     player2.status->in_track = 1;
@@ -58,12 +60,13 @@ void init() {
     player2.status->item = 0;
     player2.status->RFU = 0;
     player2.currentColor = 0x0;
+    player2.consecutiveColorReadings = 0;
 
     player2.controllerState.accelerate = 0;
     player2.controllerState.backwards = 0;
     player2.controllerState.start = 0;
     player2.controllerState.useItem = 0;
-    player2.controllerState.direction = 0;
+    player2.controllerState.direction = 127;
 
     gamestate.game_status = 1;
 }
@@ -72,7 +75,7 @@ static void activate_speed_pad_boost(PlayerStatus_t *player) {
     if ((player->status >> BOOSTED_BIT) & 0) {
         player->status |= 1 << BOOSTED_BIT;
     }
-    //sendGamestateToPi(gamestate);
+    sendGamestateToPi(gamestate);
 }
 
 //player drives over finishing line
@@ -103,12 +106,12 @@ static void set_random_item(PlayerStatus_t *player) {
 
 static int is_within_deviation(uint32_t isRGBValue, int shouldRGBValue) {
     //needed as 0x000000 - color_deviation may result in unexpected behaviour
-    if (shouldRGBValue == BLACK) {
+    if (isRGBValue < COLOR_DEVIATION) {
         return (isRGBValue >= shouldRGBValue && isRGBValue < shouldRGBValue + COLOR_DEVIATION);
     }
 
     //needed as 0xffffff + color_deviation may result in unexpected behaviour
-    if (shouldRGBValue == WHITE) {
+    if (isRGBValue > WHITE - COLOR_DEVIATION) {
         return (isRGBValue > shouldRGBValue - COLOR_DEVIATION && isRGBValue <= shouldRGBValue);
     }
 
@@ -116,6 +119,14 @@ static int is_within_deviation(uint32_t isRGBValue, int shouldRGBValue) {
     return isRGBValue > shouldRGBValue - COLOR_DEVIATION && isRGBValue < shouldRGBValue + COLOR_DEVIATION;
 }
 
+static void compare_to_previous_color(Player_t *player, uint32_t color) {
+    if (player->currentColor == color) {
+        player->consecutiveColorReadings++;
+    } else {
+        player->currentColor = color;
+        player->consecutiveColorReadings = 0;
+    }
+}
 
 //read this
 /* quick summary of what which color means. read the README for further explanation
@@ -127,50 +138,95 @@ static int is_within_deviation(uint32_t isRGBValue, int shouldRGBValue) {
  * GREEN->WHITE: player left track, decrease speed cap
  * WHITE->GREEN: player reentered track, increase speed cap
 */
+static void interpret_color(Player_t *player) {
+    switch (player->currentColor) {
+        case BLACK:
+            set_random_item(player->status);
+            break;
+        case RED:
+            activate_speed_pad_boost(player->status);
+            break;
+        case BLUE:
+            if (player->previousColor == YELLOW) {
+                subtract_finished_lap(player->status);
+            }
+            break;
+        case YELLOW:
+            if (player->previousColor == BLUE) {
+                finished_lap(player->status);
+            }
+            break;
+        case GREEN:
+            if (player->previousColor == WHITE) {
+                player->status->in_track = 1;
+            }
+            break;
+        case WHITE:
+            if (player->previousColor == GREEN) {
+                player->status->in_track = 0;
+            }
+            break;
+        default:
+            //nothing to do
+            break;
+
+    }
+    player->previousColor = player->currentColor;
+}
+
+
 void on_color_change(uint8_t player_number, uColor_t color) {
     uint32_t rgb = color.color;
-    Player_t player = player_number == 0 ? player1 : player2;
+    Player_t *player = player_number == 0 ? &player1 : &player2;
 
     if (is_within_deviation(rgb, BLACK)) {
-        set_random_item(player.status);
-        player.currentColor = BLACK;
+        compare_to_previous_color(player, BLACK);
     }
     else if (is_within_deviation(rgb, RED)) {
-        activate_speed_pad_boost(player.status);
-        player.currentColor = RED;
+        compare_to_previous_color(player, RED);
     }
     else if (is_within_deviation(rgb, BLUE)){
-        if (player.currentColor == YELLOW) {
-            subtract_finished_lap(player.status);
-        }
-        player.currentColor = BLUE;
+        compare_to_previous_color(player, BLUE);
     }
     else if (is_within_deviation(rgb, YELLOW)) {
-        if (player.currentColor == BLUE) {
-            player.currentColor = YELLOW;
-        }
+        compare_to_previous_color(player, YELLOW);
     }
     else if (is_within_deviation(rgb, GREEN)) {
-        if (player.currentColor == WHITE) {
-            player.status->in_track = 1; //slow down handled in handle_acceleration
-        }
-        player.currentColor = GREEN;
+        compare_to_previous_color(player, GREEN);
     }
     else if (is_within_deviation(rgb, WHITE)) {
-        if (player.currentColor == GREEN) {
-            player.status->in_track = 0;
-        }
-        player.currentColor = WHITE;
+        compare_to_previous_color(player, WHITE);
+    }
+
+    if (player->consecutiveColorReadings == 3) {
+        interpret_color(player);
     }
 }
 
+
+
+
+//vvvvvv handling commands vvvvvvvv
+
+
+
+
 /**
- * Apply Gamestat to the commands send to the car
+ * Apply Gamestate to the commands send to the car
  * @param player player 1 or 2
  * @param command actual command which should be modified
  */
 static void handle_new_command(uint8_t player_no, Command_t *command) {
-    Player_t *player = player_no == 0 ? &player1 : &player2;
+    Player_t *player;
+    Player_t *enemyPlayer;
+
+    if (!player_no) {
+        player = &player1;
+        enemyPlayer = &player2;
+    } else {
+        player = &player2;
+        enemyPlayer = &player1;
+    }
 	
 	switch (command->command) {
 		case DIRECTION:
@@ -188,9 +244,12 @@ static void handle_new_command(uint8_t player_no, Command_t *command) {
             break;
 		case START:
             player->controllerState.start = command->value;
+
 			break;
 		case USEITEM:
-            player->controllerState.useItem = command->value;
+            if (command->value) {
+                handle_use_item(player, enemyPlayer);
+            }
 			break;
 		default:
 		    //nothing to do here yet
@@ -205,21 +264,11 @@ void on_command(uint8_t player_number, Command_t command) {
 	}
 }
 
-//backwards input (left <-> right) left = 0, right = 255, straight forward 127/128
-//TODO check limits
+//returns direction input of player. left = 0, right = 255, straight forward 127/128
+// if reversed bit active, reverse direction (left <-> right)
 int get_steering(Player_t *player) {
 	if (player->status->status & REVERSED_BIT) {
-		int difference;
-        int direction = player->controllerState.direction;
-
-		if (direction < AVERAGE) {
-			difference = AVERAGE - direction;
-			return AVERAGE + difference;
-		}
-		else if (direction > AVERAGE) {
-			difference = direction - AVERAGE;
-			return AVERAGE - difference;
-		}
+		return MAX_DIRECTION - player->controllerState.direction;
 	}
     return player->controllerState.direction;
 }
@@ -230,7 +279,8 @@ int get_engine(Player_t *player) {
     }
     else if (player->controllerState.backwards) {
         return handle_backwards(player);
-    } else {
+    }
+    else {
         return STOP_CAP;
     }
 }
@@ -255,27 +305,27 @@ int handle_backwards(Player_t *player) {
     }
 }
 
-void handle_start(PlayerStatus_t *player, Command_t *command) {
+void handle_start(Player_t *player) {
 	//todo
 }
 
-void handle_use_item(PlayerStatus_t *player, PlayerStatus_t *enemyPlayer) {
+void handle_use_item(Player_t *player, Player_t *enemyPlayer) {
     //todo how long are these stati active?
-    switch (player->item) {
+    switch (player->status->item) {
         case BOOST:
-            player->status |= 1 << BOOSTED_BIT;
-            player->status |= 0 << SLOWED_BIT;
+            player->status->status |= 1 << BOOSTED_BIT;
+            player->status->status |= 0 << SLOWED_BIT;
             break;
         case LIGHTNING:
-            enemyPlayer->status |= 0 << BOOSTED_BIT;
-            enemyPlayer->status |= 1 << SLOWED_BIT;
+            enemyPlayer->status->status |= 0 << BOOSTED_BIT;
+            enemyPlayer->status->status |= 1 << SLOWED_BIT;
             break;
         case REVERSE:
-            enemyPlayer->status |= 1 << REVERSED_BIT;
+            enemyPlayer->->status->status |= 1 << REVERSED_BIT;
             break;
         default:
             //nothing to do
             break;
     }
-    player->item = 0;
+    player->status->item = 0;
 }
